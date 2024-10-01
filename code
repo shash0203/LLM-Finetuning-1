@@ -1,0 +1,205 @@
+Step 1: Model Fine-tuning
+1.1 Environment Setup Ensure you have the necessary libraries installed. Use the following command to install Hugging Face's Transformers library if you haven't already:
+
+bash
+Copy code
+pip install transformers datasets torch
+1.2 Loading the Dataset
+
+Assuming you have a dataset in a CSV file with columns: Report Name, History, and Observation.
+
+python
+Copy code
+import pandas as pd
+
+# Load the dataset
+data = pd.read_csv('dataset.csv')
+
+# Display the first few rows of the dataset
+print(data.head())
+1.3 Fine-tuning the Model
+
+Choose the model based on your hardware (e.g., use gemma-2b-it for limited resources).
+
+python
+Copy code
+from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments
+
+# Choose the model
+model_name = "gemma-2b-it"  # Change to "gemma-7b-it" if your hardware supports it
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(model_name)
+
+# Preprocess the dataset for training
+train_data = data.sample(300, random_state=42)
+eval_data = data.drop(train_data.index)
+
+# Tokenization
+train_encodings = tokenizer(train_data['Report Name'].tolist(), truncation=True, padding=True, max_length=512)
+eval_encodings = tokenizer(eval_data['Report Name'].tolist(), truncation=True, padding=True, max_length=512)
+
+# Create dataset class
+class ImpressionDataset(torch.utils.data.Dataset):
+    def __init__(self, encodings):
+        self.encodings = encodings
+
+    def __getitem__(self, idx):
+        item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
+        return item
+
+    def __len__(self):
+        return len(self.encodings['input_ids'])
+
+# Create dataset instances
+train_dataset = ImpressionDataset(train_encodings)
+eval_dataset = ImpressionDataset(eval_encodings)
+
+# Training arguments
+training_args = TrainingArguments(
+    output_dir='./results',
+    num_train_epochs=3,
+    per_device_train_batch_size=4,
+    per_device_eval_batch_size=4,
+    warmup_steps=500,
+    weight_decay=0.01,
+    logging_dir='./logs',
+    logging_steps=10,
+)
+
+# Trainer instance
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
+)
+
+# Fine-tune the model
+trainer.train()
+
+# Save the fine-tuned model
+trainer.save_model('fine_tuned_model')
+Step 2: Model Evaluation
+2.1 Generating Impressions
+
+python
+Copy code
+# Generate impressions using the fine-tuned model
+eval_samples = eval_data['Report Name'].tolist()
+impressions = []
+
+for sample in eval_samples:
+    inputs = tokenizer(sample, return_tensors='pt')
+    outputs = model.generate(**inputs, max_length=100)
+    impressions.append(tokenizer.decode(outputs[0], skip_special_tokens=True))
+
+# Store impressions in a DataFrame
+impressions_df = pd.DataFrame({'Original': eval_samples, 'Generated': impressions})
+print(impressions_df)
+2.2 Compute Perplexity and ROUGE Scores
+
+python
+Copy code
+from transformers import pipeline
+
+# Compute perplexity
+def calculate_perplexity(generated_texts):
+    # Placeholder for perplexity calculation logic
+    return perplexity_value
+
+perplexity = calculate_perplexity(impressions)
+
+# Compute ROUGE score
+rouge = pipeline("metric", model="rouge")
+rouge_score = rouge.compute(predictions=impressions, references=eval_data['Report Name'].tolist())
+print(f"Perplexity: {perplexity}, ROUGE Score: {rouge_score}")
+Step 3: Text Analysis
+3.1 Text Pre-processing
+
+python
+Copy code
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer, WordNetLemmatizer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+
+# Ensure to download stopwords and other resources from NLTK
+import nltk
+nltk.download('stopwords')
+nltk.download('wordnet')
+
+stop_words = set(stopwords.words('english'))
+stemmer = PorterStemmer()
+lemmatizer = WordNetLemmatizer()
+
+# Preprocess the entire dataset
+def preprocess_text(text):
+    words = text.split()
+    processed = [lemmatizer.lemmatize(stemmer.stem(word)) for word in words if word.lower() not in stop_words]
+    return ' '.join(processed)
+
+data['Processed'] = data['Report Name'].apply(preprocess_text)
+
+# Convert to embeddings (example using word vectors)
+from sentence_transformers import SentenceTransformer
+
+model_embedding = SentenceTransformer('all-MiniLM-L6-v2')
+embeddings = model_embedding.encode(data['Processed'].tolist())
+
+# Calculate cosine similarity
+similarity_matrix = cosine_similarity(embeddings)
+word_pairs = []
+
+# Identify top 100 word pairs based on embedding similarity
+for i in range(len(similarity_matrix)):
+    for j in range(i + 1, len(similarity_matrix)):
+        word_pairs.append((data['Processed'][i], data['Processed'][j], similarity_matrix[i][j]))
+
+word_pairs_sorted = sorted(word_pairs, key=lambda x: x[2], reverse=True)[:100]
+Step 4: Visualization
+4.1 Visualize Top 100 Word Pairs
+
+python
+Copy code
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Prepare data for visualization
+top_pairs_df = pd.DataFrame(word_pairs_sorted, columns=['Word1', 'Word2', 'Similarity'])
+
+# Visualization
+plt.figure(figsize=(12, 8))
+sns.scatterplot(data=top_pairs_df, x='Word1', y='Word2', size='Similarity', sizes=(20, 200), alpha=0.6)
+plt.title('Top 100 Word Pairs Based on Embedding Similarity')
+plt.xticks(rotation=45)
+plt.show()
+Bonus: Interactive Visualization
+For an interactive visualization, you can use Plotly or Dash. Here’s a basic example using Plotly:
+
+python
+Copy code
+import plotly.express as px
+
+fig = px.scatter(top_pairs_df, x='Word1', y='Word2', size='Similarity', hover_name='Similarity', title='Top 100 Word Pairs')
+fig.show()
+Final Steps
+Documentation: Create a comprehensive README file that explains your methodology, assumptions, and how to run your code.
+
+Repository Structure:
+
+markdown
+Copy code
+/LLM_Fine_Tuning_Project
+├── dataset.csv
+├── requirements.txt
+├── fine_tuning.py
+├── evaluation.py
+├── text_analysis.py
+├── visualization.py
+├── README.md
+└── results/
+    ├── evaluation_results.txt
+    └── visualizations/
+Testing and Validation: Test your scripts and ensure everything runs as expected.
+
+Submit your Repository: Ensure your GitHub repository is public and submit the link as required.
